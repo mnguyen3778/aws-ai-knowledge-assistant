@@ -1,0 +1,13 @@
+flowchart TD
+    U[User] --> CF[Amazon CloudFront]
+    CF --> WAF[AWS WAF]
+    WAF --> COG[Amazon Cognito]
+    COG --> APIGW[Amazon API Gateway]
+    APIGW --> L[AWS Lambda]
+    L --> BR[Amazon Bedrock]
+    L --> DDB[Amazon DynamoDB]
+
+    WAF --> LOGS[WAF Logs]
+    LOGS --> S3[Amazon S3]
+    S3 --> ATH[Amazon Athena]
+    ATH --> QS[Amazon QuickSight]
