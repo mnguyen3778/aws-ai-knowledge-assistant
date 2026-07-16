@@ -80,3 +80,25 @@ What is a User Pool?
 What is an App Client?
 Why Cognito instead of custom authentication?
 How does JWT authentication work?
+
+## Architecture Update
+
+Initial implementation used an API Gateway HTTP API.
+
+During Cognito integration, the architecture was migrated to a Regional REST API because API Gateway REST APIs provide native Amazon Cognito User Pool authorizer support.
+
+The legacy HTTP API was removed after validation.
+
+Final architecture:
+
+Internet User
+↓
+Amazon Cognito
+↓
+API Gateway REST API
+↓
+AWS Lambda
+↓
+Amazon Bedrock
+↓
+Amazon Nova Lite
