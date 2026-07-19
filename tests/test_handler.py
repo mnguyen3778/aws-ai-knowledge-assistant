@@ -105,6 +105,28 @@ class AssessmentHandlerTests(unittest.TestCase):
         self.assertFalse(fake_boto3.bedrock_client.converse_called)
         self.assertNotIn("dynamodb", fake_boto3.clients)
 
+    def test_http_api_v2_assessment_route_is_isolated(self):
+        fake_boto3 = FakeBoto3()
+        event = valid_event()
+        event.pop("httpMethod")
+        event.pop("path")
+        event["rawPath"] = "/assessment"
+        event["requestContext"] = {
+            "http": {
+                "method": "POST",
+            }
+        }
+
+        with patch.dict(sys.modules, {"boto3": fake_boto3}):
+            sys.modules.pop("lambda_function", None)
+            lambda_function = importlib.import_module("lambda_function")
+
+            response = lambda_function.lambda_handler(event, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertFalse(fake_boto3.bedrock_client.converse_called)
+        self.assertNotIn("dynamodb", fake_boto3.clients)
+
     def test_non_assessment_route_preserves_existing_chat_behavior(self):
         fake_boto3 = FakeBoto3()
 

@@ -1,17 +1,17 @@
 import json
 from typing import Any
 
+from assessment.config import AssessmentVersionConfig, get_assessment_config
 from assessment.models import (
     AssessmentRequest,
-    SUPPORTED_ASSESSMENT_VERSIONS,
     ValidationError,
     ValidationResult,
 )
 from assessment.schema import (
-    ANSWER_ENTRY_ALLOWED_FIELDS,
-    ANSWER_ENTRY_REQUIRED_FIELDS,
-    REQUEST_ALLOWED_FIELDS,
-    REQUEST_REQUIRED_FIELDS,
+    ANSWER_ENTRY_QUESTION_ID_FIELD,
+    ANSWER_ENTRY_VALUE_FIELD,
+    ANSWERS_FIELD,
+    ASSESSMENT_VERSION_FIELD,
 )
 
 
@@ -20,11 +20,16 @@ def validate_assessment_request(raw_body: Any) -> ValidationResult:
     if errors:
         return ValidationResult(request=None, errors=errors)
 
-    errors.extend(_validate_top_level_payload(payload))
+    config, config_errors = _resolve_config(payload)
+    errors.extend(config_errors)
     if errors:
         return ValidationResult(request=None, errors=errors)
 
-    answers, answer_errors = _normalize_answers(payload["answers"])
+    errors.extend(_validate_top_level_payload(payload, config))
+    if errors:
+        return ValidationResult(request=None, errors=errors)
+
+    answers, answer_errors = _normalize_answers(payload[ANSWERS_FIELD], config)
     errors.extend(answer_errors)
     if errors:
         return ValidationResult(request=None, errors=errors)
@@ -37,6 +42,48 @@ def validate_assessment_request(raw_body: Any) -> ValidationResult:
         request=AssessmentRequest.from_payload(normalized_payload),
         errors=[],
     )
+
+
+def _resolve_config(
+    payload: Any,
+) -> tuple[AssessmentVersionConfig | None, list[ValidationError]]:
+    if not isinstance(payload, dict):
+        return None, [
+            ValidationError(
+                field="body",
+                message="Request body must be a JSON object.",
+            )
+        ]
+
+    if ASSESSMENT_VERSION_FIELD not in payload:
+        return None, [
+            ValidationError(
+                field=ASSESSMENT_VERSION_FIELD,
+                message="Field is required.",
+                code="REQUIRED",
+            )
+        ]
+
+    assessment_version = payload[ASSESSMENT_VERSION_FIELD]
+    if not isinstance(assessment_version, str):
+        return None, [
+            ValidationError(
+                field=ASSESSMENT_VERSION_FIELD,
+                message="Assessment version must be a string.",
+            )
+        ]
+
+    config = get_assessment_config(assessment_version)
+    if config is None:
+        return None, [
+            ValidationError(
+                field=ASSESSMENT_VERSION_FIELD,
+                message="Unsupported assessment version.",
+                code="UNSUPPORTED_VERSION",
+            )
+        ]
+
+    return config, []
 
 
 def _parse_json(raw_body: Any) -> tuple[Any, list[ValidationError]]:
@@ -80,18 +127,13 @@ def _parse_json(raw_body: Any) -> tuple[Any, list[ValidationError]]:
         ]
 
 
-def _validate_top_level_payload(payload: Any) -> list[ValidationError]:
+def _validate_top_level_payload(
+    payload: dict[str, Any],
+    config: AssessmentVersionConfig,
+) -> list[ValidationError]:
     errors: list[ValidationError] = []
 
-    if not isinstance(payload, dict):
-        return [
-            ValidationError(
-                field="body",
-                message="Request body must be a JSON object.",
-            )
-        ]
-
-    for field_name in sorted(REQUEST_REQUIRED_FIELDS - payload.keys()):
+    for field_name in sorted(config.required_fields - payload.keys()):
         errors.append(
             ValidationError(
                 field=field_name,
@@ -100,7 +142,7 @@ def _validate_top_level_payload(payload: Any) -> list[ValidationError]:
             )
         )
 
-    for field_name in sorted(payload.keys() - REQUEST_ALLOWED_FIELDS):
+    for field_name in sorted(payload.keys() - config.allowed_fields):
         errors.append(
             ValidationError(
                 field=field_name,
@@ -109,39 +151,19 @@ def _validate_top_level_payload(payload: Any) -> list[ValidationError]:
             )
         )
 
-    assessment_version = payload.get("assessmentVersion")
-    if (
-        "assessmentVersion" in payload
-        and assessment_version not in SUPPORTED_ASSESSMENT_VERSIONS
-    ):
-        errors.append(
-            ValidationError(
-                field="assessmentVersion",
-                message="Unsupported assessment version.",
-                code="UNSUPPORTED_VERSION",
+    for field_name in sorted(config.object_fields):
+        if field_name in payload and not isinstance(payload[field_name], dict):
+            errors.append(
+                ValidationError(
+                    field=field_name,
+                    message=f"{field_name} must be an object.",
+                )
             )
-        )
 
-    if "organization" in payload and not isinstance(payload["organization"], dict):
+    if ANSWERS_FIELD in payload and not payload[ANSWERS_FIELD]:
         errors.append(
             ValidationError(
-                field="organization",
-                message="Organization must be an object.",
-            )
-        )
-
-    if "respondent" in payload and not isinstance(payload["respondent"], dict):
-        errors.append(
-            ValidationError(
-                field="respondent",
-                message="Respondent must be an object.",
-            )
-        )
-
-    if "answers" in payload and not payload["answers"]:
-        errors.append(
-            ValidationError(
-                field="answers",
+                field=ANSWERS_FIELD,
                 message="At least one answer is required.",
                 code="REQUIRED",
             )
@@ -150,16 +172,19 @@ def _validate_top_level_payload(payload: Any) -> list[ValidationError]:
     return errors
 
 
-def _normalize_answers(raw_answers: Any) -> tuple[dict[str, float | int], list[ValidationError]]:
+def _normalize_answers(
+    raw_answers: Any,
+    config: AssessmentVersionConfig,
+) -> tuple[dict[str, float | int], list[ValidationError]]:
     if isinstance(raw_answers, dict):
         return _normalize_answer_map(raw_answers)
 
     if isinstance(raw_answers, list):
-        return _normalize_answer_entries(raw_answers)
+        return _normalize_answer_entries(raw_answers, config)
 
     return {}, [
         ValidationError(
-            field="answers",
+            field=ANSWERS_FIELD,
             message="Answers must be an object or a list of answer entries.",
         )
     ]
@@ -198,6 +223,7 @@ def _normalize_answer_map(
 
 def _normalize_answer_entries(
     raw_answers: list[Any],
+    config: AssessmentVersionConfig,
 ) -> tuple[dict[str, float | int], list[ValidationError]]:
     errors: list[ValidationError] = []
     answers: dict[str, float | int] = {}
@@ -215,7 +241,7 @@ def _normalize_answer_entries(
             )
             continue
 
-        for field_name in sorted(ANSWER_ENTRY_REQUIRED_FIELDS - entry.keys()):
+        for field_name in sorted(config.answer_entry_required_fields - entry.keys()):
             entry_errors.append(
                 ValidationError(
                     field=f"{field_prefix}.{field_name}",
@@ -224,7 +250,7 @@ def _normalize_answer_entries(
                 )
             )
 
-        for field_name in sorted(entry.keys() - ANSWER_ENTRY_ALLOWED_FIELDS):
+        for field_name in sorted(entry.keys() - config.answer_entry_allowed_fields):
             entry_errors.append(
                 ValidationError(
                     field=f"{field_prefix}.{field_name}",
@@ -233,15 +259,15 @@ def _normalize_answer_entries(
                 )
             )
 
-        question_id = entry.get("questionId")
-        value = entry.get("value")
+        question_id = entry.get(ANSWER_ENTRY_QUESTION_ID_FIELD)
+        value = entry.get(ANSWER_ENTRY_VALUE_FIELD)
 
-        if "questionId" in entry and (
+        if ANSWER_ENTRY_QUESTION_ID_FIELD in entry and (
             not isinstance(question_id, str) or not question_id.strip()
         ):
             entry_errors.append(
                 ValidationError(
-                    field=f"{field_prefix}.questionId",
+                    field=f"{field_prefix}.{ANSWER_ENTRY_QUESTION_ID_FIELD}",
                     message="Question ID must be a non-empty string.",
                 )
             )
@@ -249,16 +275,16 @@ def _normalize_answer_entries(
         if isinstance(question_id, str) and question_id in seen_question_ids:
             entry_errors.append(
                 ValidationError(
-                    field=f"{field_prefix}.questionId",
+                    field=f"{field_prefix}.{ANSWER_ENTRY_QUESTION_ID_FIELD}",
                     message="Duplicate question ID is not allowed.",
                     code="DUPLICATE_QUESTION_ID",
                 )
             )
 
-        if "value" in entry and not _is_numeric_answer(value):
+        if ANSWER_ENTRY_VALUE_FIELD in entry and not _is_numeric_answer(value):
             entry_errors.append(
                 ValidationError(
-                    field=f"{field_prefix}.value",
+                    field=f"{field_prefix}.{ANSWER_ENTRY_VALUE_FIELD}",
                     message="Answer value must be numeric.",
                 )
             )

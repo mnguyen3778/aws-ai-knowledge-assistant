@@ -22,33 +22,21 @@ class AnswerEntry:
         }
 
 
-REQUEST_REQUIRED_FIELDS = {
-    "assessmentVersion",
-    "organization",
-    "respondent",
-    "answers",
-}
-
-REQUEST_ALLOWED_FIELDS = REQUEST_REQUIRED_FIELDS
-
-ANSWER_ENTRY_REQUIRED_FIELDS = {
-    "questionId",
-    "value",
-}
-
-ANSWER_ENTRY_ALLOWED_FIELDS = ANSWER_ENTRY_REQUIRED_FIELDS
+ASSESSMENT_VERSION_FIELD = "assessmentVersion"
+ANSWERS_FIELD = "answers"
+ANSWER_ENTRY_QUESTION_ID_FIELD = "questionId"
+ANSWER_ENTRY_VALUE_FIELD = "value"
 
 
 __all__ = [
-    "ANSWER_ENTRY_ALLOWED_FIELDS",
-    "ANSWER_ENTRY_REQUIRED_FIELDS",
     "AnswerEntry",
     "AssessmentRequest",
     "AssessmentResponse",
+    "ASSESSMENT_VERSION_FIELD",
+    "ANSWER_ENTRY_QUESTION_ID_FIELD",
+    "ANSWER_ENTRY_VALUE_FIELD",
+    "ANSWERS_FIELD",
     "CategoryScore",
     "ReadinessLevel",
     "Recommendation",
-    "REQUEST_ALLOWED_FIELDS",
-    "REQUEST_REQUIRED_FIELDS",
 ]
-

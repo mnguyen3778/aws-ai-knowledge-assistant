@@ -1,45 +1,41 @@
-from assessment.models import (
-    AssessmentRequest,
-    AssessmentResponse,
-    ReadinessLevel,
-)
-
-
-# TODO: Replace these placeholders with the canonical Nguyen-AI Question Bank.
-QUESTION_MAPPINGS: dict[str, str] = {}
-
-# TODO: Map canonical question IDs to official Nguyen-AI categories.
-CATEGORY_MAPPINGS: dict[str, str] = {}
-
-# TODO: Add official Nguyen-AI question/category weights.
-WEIGHTS: dict[str, float] = {}
-
-# TODO: Add official Nguyen-AI readiness-level thresholds.
-THRESHOLDS: dict[str, tuple[float, float]] = {}
-
-# TODO: Add official Nguyen-AI recommendation mappings.
-RECOMMENDATION_MAPPINGS: dict[str, str] = {}
+from assessment.config import AssessmentVersionConfig, get_assessment_config
+from assessment.models import AssessmentRequest, AssessmentResponse, ReadinessLevel
 
 
 def score_assessment(request: AssessmentRequest) -> AssessmentResponse:
     """Return a deterministic placeholder until the official rubric is supplied."""
+    config = get_assessment_config(request.assessment_version)
+    if config is None:
+        config = _unsupported_version_config(request.assessment_version)
+
     # TODO: Calculate normalized score from canonical mappings, weights, and thresholds.
     # TODO: Populate categoryScores from official Nguyen-AI categories.
     # TODO: Populate recommendations from official recommendation mappings.
+    placeholder = config.placeholder_result
     return AssessmentResponse(
         requestId="",
         assessmentVersion=request.assessment_version,
-        overallScore=0,
+        overallScore=placeholder.overall_score,
         readinessLevel=ReadinessLevel(
-            id="pending-rubric",
-            label="Pending Official Rubric",
-            description=(
-                "Deterministic scoring is not available until the official "
-                "Nguyen-AI rubric is provided."
-            ),
+            id=placeholder.readiness_level_id,
+            label=placeholder.readiness_level_label,
+            description=placeholder.readiness_level_description,
         ),
-        categoryScores=[],
-        recommendations=[],
+        categoryScores=list(placeholder.category_scores),
+        recommendations=list(placeholder.recommendations),
         modelInvoked=False,
         persisted=False,
+    )
+
+
+def _unsupported_version_config(version: str) -> AssessmentVersionConfig:
+    # This path is defensive. Normal request handling rejects unsupported
+    # versions during validation before scoring is called.
+    return AssessmentVersionConfig(
+        version=version,
+        required_fields=frozenset(),
+        allowed_fields=frozenset(),
+        object_fields=frozenset(),
+        answer_entry_required_fields=frozenset(),
+        answer_entry_allowed_fields=frozenset(),
     )

@@ -2,9 +2,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-SUPPORTED_ASSESSMENT_VERSIONS = {"nguyen-ai-readiness-v1"}
-
-
 @dataclass(frozen=True)
 class ValidationError:
     field: str
@@ -25,14 +22,16 @@ class AssessmentRequest:
     organization: dict[str, Any]
     respondent: dict[str, Any]
     answers: dict[str, float | int]
+    source_payload: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "AssessmentRequest":
         return cls(
             assessment_version=payload["assessmentVersion"],
-            organization=payload["organization"],
-            respondent=payload["respondent"],
+            organization=payload.get("organization", {}),
+            respondent=payload.get("respondent", {}),
             answers=payload["answers"],
+            source_payload=payload,
         )
 
 
@@ -118,4 +117,3 @@ class ValidationResult:
     @property
     def is_valid(self) -> bool:
         return not self.errors and self.request is not None
-
