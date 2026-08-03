@@ -5,10 +5,7 @@ from assistant_contract.v1 import (
     ServiceMetadata,
 )
 from assistant_runtime.models import RuntimeRequestContext
-from assistant_runtime.provider import (
-    DeterministicRuntimeProvider,
-    RuntimeProvider,
-)
+from assistant_runtime.provider import RuntimeProvider
 
 
 class RuntimeDispatcher:
@@ -32,4 +29,6 @@ class RuntimeDispatcher:
 
 
 def create_default_runtime_dispatcher() -> RuntimeDispatcher:
-    return RuntimeDispatcher(provider=DeterministicRuntimeProvider())
+    from assistant_runtime.composition import create_runtime_composition_root
+
+    return create_runtime_composition_root().initialize()

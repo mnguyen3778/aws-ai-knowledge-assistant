@@ -11,14 +11,14 @@ from assistant_contract.v1 import (
     parse_contract_json,
     validate_request,
 )
-from assistant_runtime import RuntimeDispatcher, create_default_runtime_dispatcher
+from assistant_runtime import RuntimeDispatcher, create_runtime_composition_root
 
 
 PUBLIC_ASSISTANT_ENDPOINT_PATH = "/v1/assistant"
 _PUBLIC_ENDPOINT_PATTERN = re.compile(r"^/v(?P<version>[0-9]+)/assistant$")
 _FALLBACK_CORRELATION_ID = "unavailable"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-_DEFAULT_RUNTIME_DISPATCHER = create_default_runtime_dispatcher()
+_DEFAULT_RUNTIME_DISPATCHER = create_runtime_composition_root().initialize()
 
 
 def is_public_assistant_endpoint_request(event: dict[str, Any]) -> bool:

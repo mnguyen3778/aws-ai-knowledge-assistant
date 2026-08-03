@@ -3,6 +3,10 @@ from assistant_runtime.bedrock_provider import (
     BedrockRuntimeProvider,
 )
 from assistant_runtime.config import BedrockProviderConfig
+from assistant_runtime.composition import (
+    RuntimeCompositionRoot,
+    create_runtime_composition_root,
+)
 from assistant_runtime.dispatcher import (
     RuntimeDispatcher,
     create_default_runtime_dispatcher,
@@ -46,6 +50,7 @@ __all__ = [
     "BEDROCK_MODEL_ID_ENV",
     "BEDROCK_REGION_ENV",
     "RUNTIME_PROVIDER_ENV",
+    "RuntimeCompositionRoot",
     "RuntimeConfiguration",
     "RuntimeConfigurationLoader",
     "RuntimeDispatcher",
@@ -55,6 +60,7 @@ __all__ = [
     "create_bedrock_runtime_provider",
     "create_default_provider_registry",
     "create_default_runtime_dispatcher",
+    "create_runtime_composition_root",
     "load_runtime_configuration",
     "resolve_provider_selection_config",
     "validate_runtime_configuration",
