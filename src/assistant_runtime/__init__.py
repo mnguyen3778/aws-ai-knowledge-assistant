@@ -22,6 +22,15 @@ from assistant_runtime.provider_selection import (
     create_default_provider_registry,
     resolve_provider_selection_config,
 )
+from assistant_runtime.runtime_configuration import (
+    BEDROCK_MODEL_ID_ENV,
+    BEDROCK_REGION_ENV,
+    RUNTIME_PROVIDER_ENV,
+    RuntimeConfiguration,
+    RuntimeConfigurationLoader,
+    load_runtime_configuration,
+    validate_runtime_configuration,
+)
 
 
 __all__ = [
@@ -34,6 +43,11 @@ __all__ = [
     "ProviderRegistry",
     "ProviderSelectionConfig",
     "ProviderSelectionService",
+    "BEDROCK_MODEL_ID_ENV",
+    "BEDROCK_REGION_ENV",
+    "RUNTIME_PROVIDER_ENV",
+    "RuntimeConfiguration",
+    "RuntimeConfigurationLoader",
     "RuntimeDispatcher",
     "RuntimeProvider",
     "RuntimeRequestContext",
@@ -41,5 +55,7 @@ __all__ = [
     "create_bedrock_runtime_provider",
     "create_default_provider_registry",
     "create_default_runtime_dispatcher",
+    "load_runtime_configuration",
     "resolve_provider_selection_config",
+    "validate_runtime_configuration",
 ]

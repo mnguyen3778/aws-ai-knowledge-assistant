@@ -77,7 +77,7 @@ class ProviderSelectionService:
 
     def select_provider(
         self,
-        raw_config: ProviderSelectionConfig | Mapping[str, Any] | None = None,
+        raw_config: Any = None,
     ) -> RuntimeProvider:
         config = resolve_provider_selection_config(raw_config)
         provider = self._registry.create(config)
@@ -102,10 +102,14 @@ def create_default_provider_registry() -> ProviderRegistry:
 
 
 def resolve_provider_selection_config(
-    raw_config: ProviderSelectionConfig | Mapping[str, Any] | None,
+    raw_config: Any,
 ) -> ProviderSelectionConfig:
     if raw_config is None:
         return ProviderSelectionConfig()
+
+    runtime_provider_selection = getattr(raw_config, "provider_selection", None)
+    if isinstance(runtime_provider_selection, ProviderSelectionConfig):
+        return resolve_provider_selection_config(runtime_provider_selection)
 
     if isinstance(raw_config, ProviderSelectionConfig):
         if _is_valid_provider_selection_config(raw_config):
