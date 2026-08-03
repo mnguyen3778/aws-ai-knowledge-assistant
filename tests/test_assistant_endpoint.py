@@ -12,6 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from assistant_contract.v1 import (  # noqa: E402
     CONTRACT_VERSION,
     SERVICE_NAME,
+    ConversationId,
+    KnowledgeAssistantResponse,
+    Message,
+    ServiceMetadata,
     validate_error_response,
     validate_success_response,
 )
@@ -70,6 +74,25 @@ class FakeBoto3(types.SimpleNamespace):
         raise AssertionError(f"Unexpected boto3 client: {service_name}")
 
 
+class FakeRuntimeDispatcher:
+    def __init__(self):
+        self.requests = []
+
+    def dispatch(self, request):
+        self.requests.append(request)
+        return KnowledgeAssistantResponse(
+            contractVersion=CONTRACT_VERSION,
+            correlationId=request.correlationId,
+            conversationId=request.conversationId
+            or ConversationId(request.correlationId.value),
+            message=Message(
+                role="assistant",
+                content="AI Knowledge Assistant v1 contract request accepted.",
+            ),
+            service=ServiceMetadata(),
+        )
+
+
 class AssistantEndpointTests(unittest.TestCase):
     def test_valid_v1_endpoint_request_returns_contract_response(self):
         response = handle_public_assistant_endpoint(valid_endpoint_event())
@@ -84,6 +107,33 @@ class AssistantEndpointTests(unittest.TestCase):
         self.assertEqual(contract_response.conversationId.value, "conversation-001")
         self.assertEqual(contract_response.message.role, "assistant")
         self.assertEqual(contract_response.service.name, SERVICE_NAME)
+        self.assertEqual(
+            response["body"],
+            (
+                '{"contractVersion":"ai-knowledge-assistant-v1",'
+                '"conversationId":"conversation-001",'
+                '"correlationId":"web-req-001",'
+                '"message":{"content":"AI Knowledge Assistant v1 '
+                'contract request accepted.","role":"assistant"},'
+                '"service":{"contractVersion":"ai-knowledge-assistant-v1",'
+                '"name":"aws-ai-knowledge-assistant"}}'
+            ),
+        )
+
+    def test_valid_v1_endpoint_request_delegates_to_runtime_dispatcher(self):
+        runtime_dispatcher = FakeRuntimeDispatcher()
+
+        response = handle_public_assistant_endpoint(
+            valid_endpoint_event(),
+            runtime_dispatcher=runtime_dispatcher,
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(len(runtime_dispatcher.requests), 1)
+        self.assertEqual(
+            runtime_dispatcher.requests[0].correlationId.value,
+            "web-req-001",
+        )
 
     def test_valid_request_without_conversation_id_is_deterministic(self):
         event = valid_endpoint_event()

@@ -2,25 +2,23 @@ import re
 from typing import Any
 
 from assistant_contract.v1 import (
-    CONTRACT_VERSION,
-    ConversationId,
     CorrelationId,
     ErrorDetail,
     ErrorResponse,
     KnowledgeAssistantResponse,
-    Message,
     ServiceMetadata,
     dumps_contract_json,
     parse_contract_json,
     validate_request,
 )
+from assistant_runtime import RuntimeDispatcher, create_default_runtime_dispatcher
 
 
 PUBLIC_ASSISTANT_ENDPOINT_PATH = "/v1/assistant"
 _PUBLIC_ENDPOINT_PATTERN = re.compile(r"^/v(?P<version>[0-9]+)/assistant$")
 _FALLBACK_CORRELATION_ID = "unavailable"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-_CONTRACT_ACCEPTED_MESSAGE = "AI Knowledge Assistant v1 contract request accepted."
+_DEFAULT_RUNTIME_DISPATCHER = create_default_runtime_dispatcher()
 
 
 def is_public_assistant_endpoint_request(event: dict[str, Any]) -> bool:
@@ -28,7 +26,10 @@ def is_public_assistant_endpoint_request(event: dict[str, Any]) -> bool:
     return _PUBLIC_ENDPOINT_PATTERN.fullmatch(path or "") is not None
 
 
-def handle_public_assistant_endpoint(event: dict[str, Any]) -> dict[str, Any]:
+def handle_public_assistant_endpoint(
+    event: dict[str, Any],
+    runtime_dispatcher: RuntimeDispatcher = _DEFAULT_RUNTIME_DISPATCHER,
+) -> dict[str, Any]:
     method, path = _extract_method_and_path(event)
     payload, parse_errors = parse_contract_json(event.get("body"))
     correlation_id = _correlation_id_from_payload(payload)
@@ -112,21 +113,7 @@ def handle_public_assistant_endpoint(event: dict[str, Any]) -> dict[str, Any]:
             ],
         )
 
-    conversation_id = request.conversationId
-    if conversation_id is None:
-        conversation_id = ConversationId(request.correlationId.value)
-
-    response = KnowledgeAssistantResponse(
-        contractVersion=CONTRACT_VERSION,
-        correlationId=request.correlationId,
-        conversationId=conversation_id,
-        message=Message(
-            role="assistant",
-            content=_CONTRACT_ACCEPTED_MESSAGE,
-        ),
-        service=ServiceMetadata(),
-    )
-
+    response = runtime_dispatcher.dispatch(request)
     return _json_response(200, response)
 
 
@@ -140,7 +127,6 @@ def _contract_error_response(
     return _json_response(
         status_code,
         ErrorResponse(
-            contractVersion=CONTRACT_VERSION,
             correlationId=correlation_id,
             code=code,
             message=message,
