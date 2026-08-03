@@ -1,5 +1,9 @@
 import json
 import boto3
+from assistant_endpoint import (
+    handle_public_assistant_endpoint,
+    is_public_assistant_endpoint_request,
+)
 from assessment.handler import handle_assessment
 
 bedrock = boto3.client(
@@ -8,6 +12,9 @@ bedrock = boto3.client(
 )
 
 def lambda_handler(event, context):
+    if is_public_assistant_endpoint_request(event):
+        return handle_public_assistant_endpoint(event)
+
     if _is_assessment_request(event):
         return handle_assessment(event)
 
