@@ -14,6 +14,14 @@ from assistant_runtime.provider import (
     DeterministicRuntimeProvider,
     RuntimeProvider,
 )
+from assistant_runtime.provider_selection import (
+    ProviderIdentifier,
+    ProviderRegistry,
+    ProviderSelectionConfig,
+    ProviderSelectionService,
+    create_default_provider_registry,
+    resolve_provider_selection_config,
+)
 
 
 __all__ = [
@@ -22,10 +30,16 @@ __all__ = [
     "BedrockProviderConfig",
     "BedrockRuntimeProvider",
     "DeterministicRuntimeProvider",
+    "ProviderIdentifier",
+    "ProviderRegistry",
+    "ProviderSelectionConfig",
+    "ProviderSelectionService",
     "RuntimeDispatcher",
     "RuntimeProvider",
     "RuntimeRequestContext",
     "RuntimeResponse",
     "create_bedrock_runtime_provider",
+    "create_default_provider_registry",
     "create_default_runtime_dispatcher",
+    "resolve_provider_selection_config",
 ]
