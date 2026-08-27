@@ -4,6 +4,7 @@ from trusted_authorization.applicability import (
 )
 from trusted_authorization.evaluator import (
     AUTHORIZATION_SEMANTICS_VERSION,
+    BOUNDED_EVALUATION_CONTEXT,
     AuthorizationAuthoritySource,
     TrustedAuthorizationEvaluator,
 )
@@ -17,6 +18,7 @@ from trusted_authorization.models import (
     AuthorizationResult,
     BusinessEntity,
     Entitlement,
+    GovernedVersionContext,
     GovernedResource,
     Membership,
     PrincipalMapping,
@@ -30,6 +32,7 @@ from trusted_authorization.models import (
 __all__ = [
     "APPLICABILITY_GOVERNANCE_VERSION",
     "AUTHORIZATION_SEMANTICS_VERSION",
+    "BOUNDED_EVALUATION_CONTEXT",
     "AuthorityLookupResult",
     "AuthorityLookupStatus",
     "AuthorityRecordState",
@@ -40,6 +43,7 @@ __all__ = [
     "AuthorizationResult",
     "BusinessEntity",
     "Entitlement",
+    "GovernedVersionContext",
     "GovernedResource",
     "Membership",
     "PrincipalMapping",

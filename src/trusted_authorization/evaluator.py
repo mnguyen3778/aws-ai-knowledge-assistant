@@ -18,6 +18,7 @@ from trusted_authorization.models import (
     AuthorizationResult,
     BusinessEntity,
     Entitlement,
+    GovernedVersionContext,
     GovernedResource,
     Membership,
     PrincipalMapping,
@@ -32,6 +33,8 @@ from trusted_authorization.models import (
 AUTHORIZATION_SEMANTICS_VERSION = (
     "deterministic-authorization-decision-semantics-v1"
 )
+BOUNDED_EVALUATION_CONTEXT = "local-deterministic-fixture"
+_MISSING = object()
 
 
 class AuthorizationAuthoritySource(Protocol):
@@ -81,16 +84,20 @@ class TrustedAuthorizationEvaluator:
                 subject_evidence=None,
                 resource_reference=None,
                 requested_action=None,
+                governed_version_context=None,
                 correlation_id="malformed-request",
-                evaluation_context="trusted-authorization",
+                evaluation_context=BOUNDED_EVALUATION_CONTEXT,
             )
 
-        subject = request.subject_evidence
+        subject = _required_instance_field(request, "subject_evidence")
+        subject_provider = _required_instance_field(subject, "provider")
+        subject_identifier = _required_instance_field(subject, "subject")
+        subject_verified = _required_instance_field(subject, "verified")
         if (
             not isinstance(subject, TrustedSubjectEvidence)
-            or subject.verified is not True
-            or not _has_value(subject.provider)
-            or not _has_value(subject.subject)
+            or subject_verified is not True
+            or not _has_value(subject_provider)
+            or not _has_value(subject_identifier)
         ):
             return self._deny(
                 request=request,
@@ -99,22 +106,45 @@ class TrustedAuthorizationEvaluator:
                 authority_inputs=("authentication_evidence:invalid",),
             )
 
-        action = _canonical_action(request.requested_action)
+        version_context = _required_instance_field(
+            request,
+            "governed_version_context",
+        )
+        evaluation_context = _required_instance_field(request, "evaluation_context")
+        version_context_error = _governed_version_context_error(
+            version_context,
+            evaluation_context,
+        )
+        version_context_inputs = (
+            ("authentication_evidence:verified",)
+            + _governed_version_context_inputs(version_context)
+        )
+        if version_context_error is not None:
+            return self._deny(
+                request=request,
+                reason=version_context_error,
+                requested_action=None,
+                authority_inputs=version_context_inputs,
+            )
+
+        action = _canonical_action(
+            _required_instance_field(request, "requested_action")
+        )
         if action is None:
             return self._deny(
                 request=request,
                 reason=ReasonCategory.ACTION_UNSUPPORTED,
                 requested_action=None,
-                authority_inputs=("authentication_evidence:verified",),
+                authority_inputs=version_context_inputs,
             )
 
         principal_lookup = self._resolve_authority(
             "resolve_principal_mapping",
-            subject.provider,
-            subject.subject,
+            subject_provider,
+            subject_identifier,
         )
         consulted = (
-            ("authentication_evidence:verified",)
+            version_context_inputs
             + _authority_inputs("principal_mapping", principal_lookup)
         )
         principal_error = _lookup_error_reason(
@@ -129,11 +159,11 @@ class TrustedAuthorizationEvaluator:
                 authority_inputs=consulted,
             )
 
-        principal_mapping = principal_lookup.records[0]
-        principal_record_error = _principal_mapping_record_error(
-            principal_mapping,
-            subject.provider,
-            subject.subject,
+        principal_record = principal_lookup.records[0]
+        principal_record_error, principal_mapping = _validated_principal_mapping(
+            principal_record,
+            subject_provider,
+            subject_identifier,
         )
         if principal_record_error is not None:
             return self._deny(
@@ -142,13 +172,17 @@ class TrustedAuthorizationEvaluator:
                 requested_action=action,
                 principal_id=(
                     principal_mapping.principal_id
-                    if isinstance(principal_mapping, PrincipalMapping)
+                    if principal_mapping is not None
                     else None
                 ),
                 authority_inputs=consulted,
             )
 
-        if not _has_value(request.resource_reference):
+        resource_reference = _required_instance_field(
+            request,
+            "resource_reference",
+        )
+        if not _has_value(resource_reference):
             return self._deny(
                 request=request,
                 reason=ReasonCategory.RESOURCE_UNRESOLVED,
@@ -159,7 +193,7 @@ class TrustedAuthorizationEvaluator:
 
         resource_lookup = self._resolve_authority(
             "resolve_resource",
-            request.resource_reference or "",
+            resource_reference,
         )
         resource_error = _lookup_error_reason(
             resource_lookup,
@@ -178,10 +212,10 @@ class TrustedAuthorizationEvaluator:
                 authority_inputs=consulted,
             )
 
-        resource = resource_lookup.records[0]
-        resource_record_error = _resource_record_error(
-            resource,
-            request.resource_reference or "",
+        resource_record = resource_lookup.records[0]
+        resource_record_error, resource = _validated_resource(
+            resource_record,
+            resource_reference,
         )
         if resource_record_error is not None:
             return self._deny(
@@ -191,10 +225,10 @@ class TrustedAuthorizationEvaluator:
                 principal_id=principal_mapping.principal_id,
                 business_entity_id=(
                     resource.business_entity_id
-                    if isinstance(resource, GovernedResource)
+                    if resource is not None
                     else None
                 ),
-                resource=resource if isinstance(resource, GovernedResource) else None,
+                resource=resource,
                 authority_inputs=consulted,
             )
 
@@ -238,15 +272,15 @@ class TrustedAuthorizationEvaluator:
                 authority_inputs=consulted,
             )
 
-        business_entity = business_entity_lookup.records[0]
-        business_entity_record_error = _business_entity_record_error(
-            business_entity,
+        business_entity_record = business_entity_lookup.records[0]
+        business_entity_record_error, business_entity = _validated_business_entity(
+            business_entity_record,
             resource.business_entity_id,
         )
         if business_entity_record_error is not None:
             safe_business_entity_id = (
                 business_entity.business_entity_id
-                if isinstance(business_entity, BusinessEntity)
+                if business_entity is not None
                 and _has_value(business_entity.business_entity_id)
                 else resource.business_entity_id
             )
@@ -283,9 +317,9 @@ class TrustedAuthorizationEvaluator:
                 authority_inputs=consulted,
             )
 
-        membership = membership_lookup.records[0]
-        membership_record_error = _membership_record_error(
-            membership,
+        membership_record = membership_lookup.records[0]
+        membership_record_error, membership = _validated_membership(
+            membership_record,
             principal_mapping.principal_id,
             resource.business_entity_id,
         )
@@ -328,9 +362,9 @@ class TrustedAuthorizationEvaluator:
                 authority_inputs=consulted,
             )
 
-        entitlement = entitlement_lookup.records[0]
-        entitlement_reason = _entitlement_record_error(
-            entitlement,
+        entitlement_record = entitlement_lookup.records[0]
+        entitlement_reason, entitlement = _validated_entitlement(
+            entitlement_record,
             principal_mapping.principal_id,
             resource.business_entity_id,
             resource.resource_id,
@@ -443,28 +477,90 @@ def _canonical_action(
         return None
 
 
+def _governed_version_context_error(
+    context: object,
+    request_evaluation_context: object,
+) -> ReasonCategory | None:
+    if not isinstance(context, GovernedVersionContext):
+        return ReasonCategory.UNKNOWN_STATE
+
+    authorization_semantics_version = _required_instance_field(
+        context,
+        "authorization_semantics_version",
+    )
+    applicability_governance_version = _required_instance_field(
+        context,
+        "applicability_governance_version",
+    )
+    evaluation_context = _required_instance_field(context, "evaluation_context")
+    if (
+        not _has_value(authorization_semantics_version)
+        or not _has_value(applicability_governance_version)
+        or not _has_value(evaluation_context)
+        or not _has_value(request_evaluation_context)
+    ):
+        return ReasonCategory.UNKNOWN_STATE
+
+    if (
+        authorization_semantics_version != AUTHORIZATION_SEMANTICS_VERSION
+        or applicability_governance_version != APPLICABILITY_GOVERNANCE_VERSION
+        or evaluation_context != BOUNDED_EVALUATION_CONTEXT
+        or request_evaluation_context != BOUNDED_EVALUATION_CONTEXT
+    ):
+        return ReasonCategory.UNKNOWN_STATE
+
+    return None
+
+
+def _governed_version_context_inputs(
+    context: object,
+) -> tuple[str, ...]:
+    if (
+        _governed_version_context_error(
+            context,
+            _required_instance_field(context, "evaluation_context"),
+        )
+        is not None
+    ):
+        return ("governed_version_context:MALFORMED",)
+
+    return (
+        f"authorization_semantics:{AUTHORIZATION_SEMANTICS_VERSION}",
+        f"resource_action_applicability:{APPLICABILITY_GOVERNANCE_VERSION}",
+        f"evaluation_context:{BOUNDED_EVALUATION_CONTEXT}",
+    )
+
+
 def _lookup_error_reason(
     lookup: AuthorityLookupResult,
     default_reason: ReasonCategory,
 ) -> ReasonCategory | None:
-    if lookup.status is AuthorityLookupStatus.FOUND:
-        if len(lookup.records) == 1:
+    status = _required_instance_field(lookup, "status")
+    records = _required_instance_field(lookup, "records")
+    if not isinstance(status, AuthorityLookupStatus) or not isinstance(
+        records,
+        tuple,
+    ):
+        return ReasonCategory.UNKNOWN_STATE
+
+    if status is AuthorityLookupStatus.FOUND:
+        if len(records) == 1:
             return None
         return ReasonCategory.AUTHORIZATION_CONFLICT
 
-    if lookup.status is AuthorityLookupStatus.UNAVAILABLE:
+    if status is AuthorityLookupStatus.UNAVAILABLE:
         return ReasonCategory.AUTHORITY_UNAVAILABLE
 
-    if lookup.status is AuthorityLookupStatus.STALE:
+    if status is AuthorityLookupStatus.STALE:
         return ReasonCategory.STATE_STALE
 
-    if lookup.status in (
+    if status in (
         AuthorityLookupStatus.AMBIGUOUS,
         AuthorityLookupStatus.CONFLICTING,
     ):
         return ReasonCategory.AUTHORIZATION_CONFLICT
 
-    if lookup.status in (
+    if status in (
         AuthorityLookupStatus.MALFORMED,
         AuthorityLookupStatus.UNSUPPORTED,
     ):
@@ -477,175 +573,337 @@ def _normalize_lookup_result(lookup: object) -> AuthorityLookupResult:
     if not isinstance(lookup, AuthorityLookupResult):
         return AuthorityLookupResult(AuthorityLookupStatus.MALFORMED)
 
-    if not isinstance(lookup.status, AuthorityLookupStatus):
+    status = _required_instance_field(lookup, "status")
+    records = _required_instance_field(lookup, "records")
+    if not isinstance(status, AuthorityLookupStatus):
         return AuthorityLookupResult(AuthorityLookupStatus.MALFORMED)
 
-    if not isinstance(lookup.records, tuple):
+    if not isinstance(records, tuple):
         return AuthorityLookupResult(AuthorityLookupStatus.MALFORMED)
 
-    return lookup
+    return AuthorityLookupResult(status, records)
 
 
-def _principal_mapping_record_error(
+def _validated_principal_mapping(
     principal_mapping: object,
     subject_provider: str,
     subject: str,
-) -> ReasonCategory | None:
+) -> tuple[ReasonCategory | None, PrincipalMapping | None]:
     if not isinstance(principal_mapping, PrincipalMapping):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    authority_reference = _required_instance_field(
+        principal_mapping,
+        "authority_reference",
+    )
+    record_subject_provider = _required_instance_field(
+        principal_mapping,
+        "subject_provider",
+    )
+    record_subject = _required_instance_field(principal_mapping, "subject")
+    principal_id = _required_instance_field(principal_mapping, "principal_id")
 
     if (
-        not _has_value(principal_mapping.authority_reference)
-        or not _has_value(principal_mapping.subject_provider)
-        or not _has_value(principal_mapping.subject)
-        or not _has_value(principal_mapping.principal_id)
+        not _has_value(authority_reference)
+        or not _has_value(record_subject_provider)
+        or not _has_value(record_subject)
+        or not _has_value(principal_id)
     ):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    state = _authority_record_state(principal_mapping)
+    if state is None:
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    validated = PrincipalMapping(
+        authority_reference=authority_reference,
+        state=state,
+        subject_provider=record_subject_provider,
+        subject=record_subject,
+        principal_id=principal_id,
+    )
 
     if (
-        principal_mapping.subject_provider != subject_provider
-        or principal_mapping.subject != subject
+        validated.subject_provider != subject_provider
+        or validated.subject != subject
     ):
-        return ReasonCategory.PRINCIPAL_UNRESOLVED
+        return ReasonCategory.PRINCIPAL_UNRESOLVED, validated
 
-    if not _is_active(principal_mapping.state):
-        return ReasonCategory.PRINCIPAL_UNRESOLVED
+    if not _is_active(validated.state):
+        return ReasonCategory.PRINCIPAL_UNRESOLVED, validated
 
-    return None
+    return None, validated
 
 
-def _resource_record_error(
+def _validated_resource(
     resource: object,
     resource_reference: str,
-) -> ReasonCategory | None:
+) -> tuple[ReasonCategory | None, GovernedResource | None]:
     if not isinstance(resource, GovernedResource):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    authority_reference = _required_instance_field(resource, "authority_reference")
+    resource_id = _required_instance_field(resource, "resource_id")
+    record_resource_reference = _required_instance_field(
+        resource,
+        "resource_reference",
+    )
+    business_entity_id = _required_instance_field(resource, "business_entity_id")
+    resource_class = _required_instance_field(resource, "resource_class")
 
     if (
-        not _has_value(resource.authority_reference)
-        or not _has_value(resource.resource_id)
-        or not _has_value(resource.resource_reference)
-        or not _has_value(resource.business_entity_id)
-        or not isinstance(resource.resource_class, ResourceClass)
+        not _has_value(authority_reference)
+        or not _has_value(resource_id)
+        or not _has_value(record_resource_reference)
+        or not _has_value(business_entity_id)
+        or not isinstance(resource_class, ResourceClass)
     ):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
 
-    if resource.resource_reference != resource_reference:
-        return ReasonCategory.RESOURCE_MISMATCH
+    state = _authority_record_state(resource)
+    if state is None:
+        return ReasonCategory.UNKNOWN_STATE, None
 
-    if not _is_active(resource.state):
-        return ReasonCategory.RESOURCE_UNRESOLVED
+    validated = GovernedResource(
+        authority_reference=authority_reference,
+        state=state,
+        resource_id=resource_id,
+        resource_reference=record_resource_reference,
+        resource_class=resource_class,
+        business_entity_id=business_entity_id,
+    )
 
-    return None
+    if validated.resource_reference != resource_reference:
+        return ReasonCategory.RESOURCE_MISMATCH, validated
+
+    if not _is_active(validated.state):
+        return ReasonCategory.RESOURCE_UNRESOLVED, validated
+
+    return None, validated
 
 
-def _business_entity_record_error(
+def _validated_business_entity(
     business_entity: object,
     business_entity_id: str,
-) -> ReasonCategory | None:
+) -> tuple[ReasonCategory | None, BusinessEntity | None]:
     if not isinstance(business_entity, BusinessEntity):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    authority_reference = _required_instance_field(
+        business_entity,
+        "authority_reference",
+    )
+    record_business_entity_id = _required_instance_field(
+        business_entity,
+        "business_entity_id",
+    )
 
     if (
-        not _has_value(business_entity.authority_reference)
-        or not _has_value(business_entity.business_entity_id)
+        not _has_value(authority_reference)
+        or not _has_value(record_business_entity_id)
     ):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    state = _authority_record_state(business_entity)
+    if state is None:
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    validated = BusinessEntity(
+        authority_reference=authority_reference,
+        state=state,
+        business_entity_id=record_business_entity_id,
+    )
 
     if (
-        business_entity.business_entity_id != business_entity_id
-        or not _is_active(business_entity.state)
+        validated.business_entity_id != business_entity_id
+        or not _is_active(validated.state)
     ):
-        return ReasonCategory.BUSINESS_ENTITY_INVALID
+        return ReasonCategory.BUSINESS_ENTITY_INVALID, validated
 
-    return None
+    return None, validated
 
 
-def _membership_record_error(
+def _validated_membership(
     membership: object,
     principal_id: str,
     business_entity_id: str,
-) -> ReasonCategory | None:
+) -> tuple[ReasonCategory | None, Membership | None]:
     if not isinstance(membership, Membership):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    authority_reference = _required_instance_field(membership, "authority_reference")
+    record_principal_id = _required_instance_field(membership, "principal_id")
+    record_business_entity_id = _required_instance_field(
+        membership,
+        "business_entity_id",
+    )
 
     if (
-        not _has_value(membership.authority_reference)
-        or not _has_value(membership.principal_id)
-        or not _has_value(membership.business_entity_id)
+        not _has_value(authority_reference)
+        or not _has_value(record_principal_id)
+        or not _has_value(record_business_entity_id)
     ):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    state = _authority_record_state(membership)
+    if state is None:
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    validated = Membership(
+        authority_reference=authority_reference,
+        state=state,
+        principal_id=record_principal_id,
+        business_entity_id=record_business_entity_id,
+    )
 
     if (
-        not _is_active(membership.state)
-        or membership.principal_id != principal_id
-        or membership.business_entity_id != business_entity_id
+        not _is_active(validated.state)
+        or validated.principal_id != principal_id
+        or validated.business_entity_id != business_entity_id
     ):
-        return ReasonCategory.MEMBERSHIP_INVALID
+        return ReasonCategory.MEMBERSHIP_INVALID, validated
 
-    return None
+    return None, validated
 
 
-def _entitlement_record_error(
+def _validated_entitlement(
     entitlement: object,
     principal_id: str,
     business_entity_id: str,
     resource_id: str,
     action: RequestedAction,
-) -> ReasonCategory | None:
+) -> tuple[ReasonCategory | None, Entitlement | None]:
     if not isinstance(entitlement, Entitlement):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
+
+    authority_reference = _required_instance_field(entitlement, "authority_reference")
+    record_principal_id = _required_instance_field(entitlement, "principal_id")
+    record_business_entity_id = _required_instance_field(
+        entitlement,
+        "business_entity_id",
+    )
+    record_resource_id = _required_instance_field(entitlement, "resource_id")
+    record_action = _required_instance_field(entitlement, "action")
 
     if (
-        not _has_value(entitlement.authority_reference)
-        or not _has_value(entitlement.principal_id)
-        or not _has_value(entitlement.business_entity_id)
-        or not _has_value(entitlement.resource_id)
-        or not isinstance(entitlement.action, RequestedAction)
+        not _has_value(authority_reference)
+        or not _has_value(record_principal_id)
+        or not _has_value(record_business_entity_id)
+        or not _has_value(record_resource_id)
+        or not isinstance(record_action, RequestedAction)
     ):
-        return ReasonCategory.UNKNOWN_STATE
+        return ReasonCategory.UNKNOWN_STATE, None
 
-    if entitlement.principal_id != principal_id:
-        return ReasonCategory.ENTITLEMENT_NOT_APPLICABLE
+    state = _authority_record_state(entitlement)
+    if state is None:
+        return ReasonCategory.UNKNOWN_STATE, None
 
-    if entitlement.business_entity_id != business_entity_id:
-        return ReasonCategory.BUSINESS_ENTITY_MISMATCH
+    validated = Entitlement(
+        authority_reference=authority_reference,
+        state=state,
+        principal_id=record_principal_id,
+        business_entity_id=record_business_entity_id,
+        resource_id=record_resource_id,
+        action=record_action,
+    )
 
-    if entitlement.resource_id != resource_id:
-        return ReasonCategory.RESOURCE_MISMATCH
+    if validated.principal_id != principal_id:
+        return ReasonCategory.ENTITLEMENT_NOT_APPLICABLE, validated
 
-    if entitlement.action is not action:
-        return ReasonCategory.ENTITLEMENT_NOT_APPLICABLE
+    if validated.business_entity_id != business_entity_id:
+        return ReasonCategory.BUSINESS_ENTITY_MISMATCH, validated
 
-    if not _is_active(entitlement.state):
-        return ReasonCategory.ENTITLEMENT_REVOKED
+    if validated.resource_id != resource_id:
+        return ReasonCategory.RESOURCE_MISMATCH, validated
 
-    return None
+    if validated.action is not action:
+        return ReasonCategory.ENTITLEMENT_NOT_APPLICABLE, validated
+
+    if not _is_active(validated.state):
+        return ReasonCategory.ENTITLEMENT_REVOKED, validated
+
+    return None, validated
 
 
 def _is_active(state: AuthorityRecordState) -> bool:
     return state is AuthorityRecordState.ACTIVE
 
 
-def _has_value(value: str | None) -> bool:
+def _authority_record_state(record: object) -> AuthorityRecordState | None:
+    state = _required_instance_field(record, "state")
+    if isinstance(state, AuthorityRecordState):
+        return state
+
+    return None
+
+
+def _has_value(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _required_instance_field(
+    value: object,
+    name: str,
+    default: object = _MISSING,
+) -> object:
+    try:
+        instance_fields = vars(value)
+    except Exception:
+        return default
+
+    return instance_fields.get(name, default)
+
+
+def _safe_evaluation_context(value: object) -> str:
+    if value == BOUNDED_EVALUATION_CONTEXT:
+        return BOUNDED_EVALUATION_CONTEXT
+
+    return AuthorityLookupStatus.MALFORMED.value
+
+
+def _safe_correlation_id(value: object) -> str:
+    if _has_value(value):
+        return value.strip()
+
+    return "malformed-request"
+
+
+def _safe_resource_class(resource: GovernedResource | None) -> ResourceClass | None:
+    resource_class = _required_instance_field(resource, "resource_class")
+    if isinstance(resource_class, ResourceClass):
+        return resource_class
+
+    return None
+
+
+def _safe_resource_id(resource: GovernedResource | None) -> str | None:
+    resource_id = _required_instance_field(resource, "resource_id")
+    if _has_value(resource_id):
+        return resource_id.strip()
+
+    return None
 
 
 def _authority_inputs(
     label: str,
     lookup: AuthorityLookupResult,
 ) -> tuple[str, ...]:
-    if lookup.records:
+    status = _required_instance_field(lookup, "status")
+    records = _required_instance_field(lookup, "records")
+    if isinstance(records, tuple) and records:
         return tuple(
             f"{label}:{_authority_reference(record)}"
-            for record in lookup.records
+            for record in records
         )
 
-    return (f"{label}:{lookup.status.value}",)
+    if isinstance(status, AuthorityLookupStatus):
+        return (f"{label}:{status.value}",)
+
+    return (f"{label}:{AuthorityLookupStatus.MALFORMED.value}",)
 
 
 def _authority_reference(record: object) -> str:
-    reference = getattr(record, "authority_reference", None)
+    reference = _required_instance_field(record, "authority_reference")
     if _has_value(reference):
         return reference.strip()
 
@@ -665,12 +923,16 @@ def _audit_evidence(
 ) -> AuthorizationAuditEvidence:
     evidence = AuthorizationAuditEvidence(
         decision_id="pending",
-        correlation_id=request.correlation_id,
-        evaluation_context=request.evaluation_context,
+        correlation_id=_safe_correlation_id(
+            _required_instance_field(request, "correlation_id")
+        ),
+        evaluation_context=_safe_evaluation_context(
+            _required_instance_field(request, "evaluation_context")
+        ),
         principal_id=principal_id,
         business_entity_id=business_entity_id,
-        resource_id=resource.resource_id if resource else None,
-        resource_class=resource.resource_class if resource else None,
+        resource_id=_safe_resource_id(resource) if resource else None,
+        resource_class=_safe_resource_class(resource),
         requested_action=requested_action,
         applicability=applicability,
         authority_inputs=authority_inputs,

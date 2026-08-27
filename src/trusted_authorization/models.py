@@ -108,7 +108,7 @@ class AuthorityLookupResult(Generic[T]):
 class TrustedSubjectEvidence:
     provider: str
     subject: str
-    verified: bool = True
+    verified: bool
 
 
 @dataclass(frozen=True)
@@ -116,48 +116,56 @@ class AuthorizationRequest:
     subject_evidence: TrustedSubjectEvidence | None
     resource_reference: str | None
     requested_action: RequestedAction | str | None
+    governed_version_context: "GovernedVersionContext | None"
     correlation_id: str
-    evaluation_context: str = "local-deterministic-fixture"
+    evaluation_context: str
+
+
+@dataclass(frozen=True)
+class GovernedVersionContext:
+    authorization_semantics_version: str
+    applicability_governance_version: str
+    evaluation_context: str
 
 
 @dataclass(frozen=True)
 class AuthorityRecord:
     authority_reference: str
-    state: AuthorityRecordState = AuthorityRecordState.ACTIVE
+    state: AuthorityRecordState
 
 
 @dataclass(frozen=True)
 class PrincipalMapping(AuthorityRecord):
-    subject_provider: str = ""
-    subject: str = ""
-    principal_id: str = ""
+    subject_provider: str
+    subject: str
+    principal_id: str
 
 
 @dataclass(frozen=True)
 class BusinessEntity(AuthorityRecord):
-    business_entity_id: str = ""
+    business_entity_id: str
 
 
 @dataclass(frozen=True)
 class Membership(AuthorityRecord):
-    principal_id: str = ""
-    business_entity_id: str = ""
+    principal_id: str
+    business_entity_id: str
 
 
 @dataclass(frozen=True)
 class GovernedResource(AuthorityRecord):
-    resource_id: str = ""
-    resource_reference: str = ""
-    resource_class: ResourceClass = ResourceClass.REPORT
-    business_entity_id: str = ""
+    resource_id: str
+    resource_reference: str
+    resource_class: ResourceClass
+    business_entity_id: str
 
 
 @dataclass(frozen=True)
 class Entitlement(AuthorityRecord):
-    principal_id: str = ""
-    business_entity_id: str = ""
-    resource_id: str = ""
-    action: RequestedAction = RequestedAction.VIEW
+    principal_id: str
+    business_entity_id: str
+    resource_id: str
+    action: RequestedAction
 
 
 @dataclass(frozen=True)
