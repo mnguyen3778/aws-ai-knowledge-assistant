@@ -74,13 +74,15 @@ class NonProductionResourceIdentityAuthoritySource:
                 for record in applicable
             }
             if len(identities) > 1:
-                return AuthorityLookupResult.conflicting(applicable)
-            return AuthorityLookupResult.ambiguous(applicable)
+                return AuthorityLookupResult.conflicting(
+                    _resource_outputs(applicable)
+                )
+            return AuthorityLookupResult.ambiguous(_resource_outputs(applicable))
 
         record = applicable[0]
         state = record.state
         if state is AuthorityRecordState.ACTIVE:
-            return AuthorityLookupResult.found(record)
+            return AuthorityLookupResult.found(_resource_output(record))
         if state is AuthorityRecordState.STALE:
             return AuthorityLookupResult.stale()
         return AuthorityLookupResult.missing()
@@ -110,6 +112,23 @@ class NonProductionResourceIdentityAuthoritySource:
 
 def _unsupported() -> AuthorityLookupResult:
     return AuthorityLookupResult(AuthorityLookupStatus.UNSUPPORTED)
+
+
+def _resource_outputs(
+    records: tuple[GovernedResource, ...],
+) -> tuple[GovernedResource, ...]:
+    return tuple(_resource_output(record) for record in records)
+
+
+def _resource_output(record: GovernedResource) -> GovernedResource:
+    return GovernedResource(
+        authority_reference=record.authority_reference,
+        state=record.state,
+        resource_id=record.resource_id,
+        resource_reference=record.resource_reference,
+        resource_class=record.resource_class,
+        business_entity_id=record.business_entity_id,
+    )
 
 
 def _resource_snapshot(record: object) -> GovernedResource | None:

@@ -51,6 +51,15 @@ def set_resource_fields(record, **overrides):
     return record
 
 
+def mutate_to_forged_resource(record):
+    object.__setattr__(record, "authority_reference", "attacker-authority")
+    object.__setattr__(record, "state", AuthorityRecordState.REVOKED)
+    object.__setattr__(record, "resource_id", "resource-admin")
+    object.__setattr__(record, "resource_reference", "resource-admin-ref")
+    object.__setattr__(record, "resource_class", ResourceClass.EXECUTIVE_DASHBOARD)
+    object.__setattr__(record, "business_entity_id", "business-beta")
+
+
 class NonProductionResourceIdentityAuthoritySourceTests(unittest.TestCase):
     def test_known_active_resource_resolves_expected_governed_identity(self):
         expected = resource()
@@ -879,6 +888,92 @@ class NonProductionResourceIdentityAuthoritySourceTests(unittest.TestCase):
         self.assertEqual(after_original_ref.records[0].business_entity_id, "business-alpha")
         self.assertEqual(after_original_ref.records[0].resource_id, "resource-alpha")
         self.assertEqual(after_original_ref.records[0].state, AuthorityRecordState.ACTIVE)
+
+    def test_found_output_does_not_alias_internal_snapshot(self):
+        original = resource()
+        source = NonProductionResourceIdentityAuthoritySource([original])
+
+        first = source.resolve_resource("resource-alpha-ref")
+
+        self.assertEqual(first.status, AuthorityLookupStatus.FOUND)
+        returned = first.records[0]
+        self.assertIs(type(returned), GovernedResource)
+        self.assertIsNot(returned, original)
+        self.assertIsNot(returned, source._resources[0])
+
+        mutate_to_forged_resource(returned)
+        original_ref = source.resolve_resource("resource-alpha-ref")
+        forged_ref = source.resolve_resource("resource-admin-ref")
+
+        self.assertEqual(original_ref.status, AuthorityLookupStatus.FOUND)
+        self.assertEqual(forged_ref.status, AuthorityLookupStatus.NOT_FOUND)
+        self.assertEqual(forged_ref.records, ())
+        self.assertEqual(source._resources[0], resource())
+        self.assertIsNot(original_ref.records[0], source._resources[0])
+        self.assertEqual(
+            original_ref.records[0].authority_reference,
+            "resource-alpha-authority",
+        )
+        self.assertEqual(original_ref.records[0].state, AuthorityRecordState.ACTIVE)
+        self.assertEqual(original_ref.records[0].resource_id, "resource-alpha")
+        self.assertEqual(
+            original_ref.records[0].resource_reference,
+            "resource-alpha-ref",
+        )
+        self.assertEqual(original_ref.records[0].resource_class, ResourceClass.REPORT)
+        self.assertEqual(original_ref.records[0].business_entity_id, "business-alpha")
+
+    def test_ambiguous_output_does_not_alias_internal_snapshots(self):
+        source = NonProductionResourceIdentityAuthoritySource([resource(), resource()])
+
+        first = source.resolve_resource("resource-alpha-ref")
+
+        self.assertEqual(first.status, AuthorityLookupStatus.AMBIGUOUS)
+        self.assertEqual(len(first.records), 2)
+        for returned, internal in zip(first.records, source._resources):
+            self.assertIs(type(returned), GovernedResource)
+            self.assertIsNot(returned, internal)
+            mutate_to_forged_resource(returned)
+
+        second = source.resolve_resource("resource-alpha-ref")
+        forged = source.resolve_resource("resource-admin-ref")
+
+        self.assertEqual(second.status, AuthorityLookupStatus.AMBIGUOUS)
+        self.assertEqual(len(second.records), 2)
+        self.assertEqual(forged.status, AuthorityLookupStatus.NOT_FOUND)
+        self.assertEqual(forged.records, ())
+        self.assertEqual(source._resources, (resource(), resource()))
+        for returned, internal in zip(second.records, source._resources):
+            self.assertEqual(returned, resource())
+            self.assertIsNot(returned, internal)
+
+    def test_conflicting_output_does_not_alias_internal_snapshots(self):
+        conflict = replace(resource(), resource_id="resource-beta")
+        source = NonProductionResourceIdentityAuthoritySource([resource(), conflict])
+
+        first = source.resolve_resource("resource-alpha-ref")
+
+        self.assertEqual(first.status, AuthorityLookupStatus.CONFLICTING)
+        self.assertEqual(len(first.records), 2)
+        for returned, internal in zip(first.records, source._resources):
+            self.assertIs(type(returned), GovernedResource)
+            self.assertIsNot(returned, internal)
+            mutate_to_forged_resource(returned)
+
+        second = source.resolve_resource("resource-alpha-ref")
+        forged = source.resolve_resource("resource-admin-ref")
+
+        self.assertEqual(second.status, AuthorityLookupStatus.CONFLICTING)
+        self.assertEqual(len(second.records), 2)
+        self.assertEqual(forged.status, AuthorityLookupStatus.NOT_FOUND)
+        self.assertEqual(forged.records, ())
+        self.assertEqual(source._resources, (resource(), conflict))
+        self.assertEqual(
+            {record.resource_id for record in second.records},
+            {"resource-alpha", "resource-beta"},
+        )
+        for returned, internal in zip(second.records, source._resources):
+            self.assertIsNot(returned, internal)
 
     def test_valid_record_plus_malformed_evidence_fails_closed_globally(self):
         source = NonProductionResourceIdentityAuthoritySource([resource(), object()])
